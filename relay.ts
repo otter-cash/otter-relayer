@@ -31,6 +31,7 @@ console.log('args:', args)
 
 // Set up routes.
 app.get('/fee', (req: express.Request, res: express.Response): void => {
+  console.log('GET /fee')
   res.send(args.fee.toString() + '\n')
 })
 

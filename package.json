@@ -4,8 +4,8 @@
   "description": "Withdraw Relayer for Otter Cash (otter.cash)",
   "main": "relay.js",
   "scripts": {
-    "relay": "ts-node relay.ts",
-    "lint": "npx eslint . --ext .ts --fix --config ./.eslintrc.js --no-eslintrc"
+    "relay": "sudo docker kill $(sudo docker ps -q) ; sudo docker build . --network host -t relayer && sudo docker run --network host -d relayer",
+    "lint": "eslint . --ext .ts --fix --config ./.eslintrc.js --no-eslintrc"
   },
   "author": "Christopher Bender (chris@otter.cash)",
   "license": "ISC",
