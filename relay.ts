@@ -29,6 +29,12 @@ if (!args.port) {
 
 console.log('args:', args)
 
+app.use(function (req, res, next) {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+  next()
+})
+
 // Set up routes.
 app.get('/fee', (req: express.Request, res: express.Response): void => {
   console.log('GET /fee')
