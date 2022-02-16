@@ -4,3 +4,6 @@
 # Node modules.
 /node_modules/
 
+# Solana wallet.
+wallet.json
+

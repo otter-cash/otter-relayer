@@ -1,0 +1,766 @@
+{
+  "version": "0.1.0",
+  "name": "otter_cash",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        {
+          "name": "merkleState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "merkleStateBump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "depositInit",
+      "accounts": [
+        {
+          "name": "merkleState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "depositState",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "merkleStateBump",
+          "type": "u8"
+        },
+        {
+          "name": "leaf",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "depositAdvance",
+      "accounts": [
+        {
+          "name": "depositState",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "randomBits",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "depositFinalize",
+      "accounts": [
+        {
+          "name": "merkleState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "depositState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "merkleStateBump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "withdrawInit",
+      "accounts": [
+        {
+          "name": "merkleState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "withdrawState",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "merkleStateBump",
+          "type": "u8"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "array": [
+              {
+                "array": [
+                  "u64",
+                  4
+                ]
+              },
+              8
+            ]
+          }
+        },
+        {
+          "name": "root",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        },
+        {
+          "name": "nullifierHash",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        },
+        {
+          "name": "recipient",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        },
+        {
+          "name": "relayer",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        },
+        {
+          "name": "fee",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        },
+        {
+          "name": "refund",
+          "type": {
+            "array": [
+              "u64",
+              4
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "withdrawAdvance",
+      "accounts": [
+        {
+          "name": "withdrawState",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "randomBits",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "withdrawFinalize",
+      "accounts": [
+        {
+          "name": "merkleState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "withdrawState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "nullifierHashPda",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "recipient",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "relayer",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "merkleStateBump",
+          "type": "u8"
+        },
+        {
+          "name": "nullifierHashPdaBump",
+          "type": "u8"
+        },
+        {
+          "name": "nullifierHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "MerkleState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nextIndex",
+            "type": "u32"
+          },
+          {
+            "name": "filledSubtrees",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                },
+                20
+              ]
+            }
+          },
+          {
+            "name": "root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "startingRoot",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "startingIndex",
+            "type": "u32"
+          },
+          {
+            "name": "newFilledSubtrees",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                },
+                20
+              ]
+            }
+          },
+          {
+            "name": "newHashPath",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                },
+                20
+              ]
+            }
+          },
+          {
+            "name": "phaseMerkleLevel",
+            "type": "u8"
+          },
+          {
+            "name": "phaseMimcSpongeIter",
+            "type": "u8"
+          },
+          {
+            "name": "phaseMimcFeistelRound",
+            "type": "u8"
+          },
+          {
+            "name": "isFinalized",
+            "type": "bool"
+          },
+          {
+            "name": "varsCurrentIndex",
+            "type": "u32"
+          },
+          {
+            "name": "varsCurrentLevelHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsRight",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXLOut1",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXROut1",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXLPrev1",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXRPrev1",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXLPrev2",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "varsXRPrev2",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "WithdrawState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proof",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "publicSignals",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "phaseGlobVkxOrPairing",
+            "type": "u8"
+          },
+          {
+            "name": "phaseVkxIter",
+            "type": "u8"
+          },
+          {
+            "name": "phaseVkxMulIter",
+            "type": "u16"
+          },
+          {
+            "name": "phasePairingIter",
+            "type": "u8"
+          },
+          {
+            "name": "phasePairingIterStep",
+            "type": "u16"
+          },
+          {
+            "name": "isFinalized",
+            "type": "bool"
+          },
+          {
+            "name": "varsVkx",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "varsVkxMulRes",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "varsVkxFoundOne",
+            "type": "bool"
+          },
+          {
+            "name": "varsPairingP",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "varsPairingQ",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "varsPairingPAffine",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                2
+              ]
+            }
+          },
+          {
+            "name": "varsPairingQAffine",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFq12F",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                12
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFoundOne",
+            "type": "bool"
+          },
+          {
+            "name": "varsPairingEllCoeffsC",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "varsPairingQ1",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "varsPairingQ2",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFinalAdditionD",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                2
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFinalAdditionE",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                2
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFinalAddition024Intermediaries",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "array": [
+                        "u64",
+                        4
+                      ]
+                    },
+                    2
+                  ]
+                },
+                15
+              ]
+            }
+          },
+          {
+            "name": "varsPairingMemory",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                96
+              ]
+            }
+          },
+          {
+            "name": "varsPairingFq12Output",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u64",
+                    4
+                  ]
+                },
+                12
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "NullifierHashPDAState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "isUsed",
+            "type": "bool"
+          }
+        ]
+      }
+    }
+  ]
+}

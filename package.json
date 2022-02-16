@@ -4,13 +4,17 @@
   "description": "Withdraw Relayer for Otter Cash (otter.cash)",
   "main": "relay.js",
   "scripts": {
-    "relay": "sudo docker kill $(sudo docker ps -q) ; sudo docker build . --network host -t relayer && sudo docker run --network host -d relayer",
+    "kill": "sudo docker kill $(sudo docker ps -q)",
+    "prune": "sudo docker system prune --all --force",
+    "relay": "npm run kill; sudo docker build . --network host -t relayer && sudo docker run --network host relayer",
     "lint": "eslint . --ext .ts --fix --config ./.eslintrc.js --no-eslintrc"
   },
   "author": "Christopher Bender (chris@otter.cash)",
   "license": "ISC",
   "dependencies": {
+    "@project-serum/anchor": "^0.18.2",
     "express": "^4.17.2",
+    "snarkjs": "git+https://github.com/otter-cash/snarkjs.git#0f6f3f4707f15abc79d68408a41f5c446d36d2f5",
     "ts-command-line-args": "^2.2.1"
   },
   "devDependencies": {
