@@ -11,14 +11,24 @@ import { bigInt } from 'snarkjs'
 import idl from './otter_cash_idl.json'
 
 const OTTER_PROGRAM_ID = new web3.PublicKey(
-  'otterM8AATqnFXFNcPoWxTix75wou9A47xt6JbZxzS3'
+  'otterXYtgZ5DRUGX6JGtcZPg3GoWxEqcLrb9MjeCv3X'
 )
-const NETWORK_URL = 'https://nameless-icy-violet.solana-devnet.quiknode.pro/90ccb55668a25df17eaa22f5eda5897657dbc72e/'
+
+const NETWORK = 'mainnet'
+let NETWORK_URL: string
+if (NETWORK === 'mainnet') {
+  NETWORK_URL = 'https://white-quiet-glitter.solana-mainnet.quiknode.pro/50b29c4983093afa3a2f453fcc775557a4a7e692/'
+} else if (NETWORK === 'devnet') {
+  NETWORK_URL = 'https://nameless-icy-violet.solana-devnet.quiknode.pro/90ccb55668a25df17eaa22f5eda5897657dbc72e/'
+} else {
+  throw new Error('Unreachable.')
+}
+
 const connection = new web3.Connection(
   NETWORK_URL,
   {
     commitment: 'confirmed',
-    confirmTransactionInitialTimeout: 60000,
+    confirmTransactionInitialTimeout: 40000,
     disableRetryOnRateLimit: false
   }
 )
@@ -36,7 +46,8 @@ setProvider(provider)
 const program = new Program(idl, OTTER_PROGRAM_ID)
 
 const ROUNDS_PER_IX_VKX = 1
-const IXS_PER_TX_WITHDRAW = 73
+// const IXS_PER_TX_WITHDRAW = 73
+const IXS_PER_TX_WITHDRAW = 30
 const NUM_ADVANCES_WITHDRAW = 6 * (Math.ceil(256 / ROUNDS_PER_IX_VKX) + 1) + 4 * (11 + 65 * 11 + 25 + 256 * 5 + 9 + 256 * 5 + 2 + 256 * 5 + 34)
 
 const sleep = ms => new Promise((resolve, reject) => setTimeout(resolve, ms))
@@ -100,7 +111,7 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   return withdrawState
 }
 
-export async function allWithdrawAdvance (withdrawState: web3.Keypair, requestDelay: number) {
+export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
   const withdrawAdvanceIxs: web3.TransactionInstruction[] = []
   for (let i = 0; i < NUM_ADVANCES_WITHDRAW; i++) {
     const ix = program.instruction.withdrawAdvance(
@@ -114,21 +125,84 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair, requestDe
     withdrawAdvanceIxs.push(ix)
   }
 
-  const withdrawAdvancePromises: Promise<string>[] = []
-  // We can put IXS_PER_TX_WITHDRAW ixs into a single tx, and each ix will get a
-  // 200k compute budget.
+  interface withdrawAdvanceTxType {
+    tx: web3.Transaction,
+    signers: any[]
+  }
+  const withdrawAdvanceTxs: withdrawAdvanceTxType[] = []
   for (let i = 0; i < Math.ceil(NUM_ADVANCES_WITHDRAW / IXS_PER_TX_WITHDRAW); i++) {
-    console.log(i)
     const tx = new web3.Transaction()
     for (const ix of withdrawAdvanceIxs.slice(
       IXS_PER_TX_WITHDRAW * i, IXS_PER_TX_WITHDRAW * (i + 1)
     )) {
       tx.add(ix)
     }
-    withdrawAdvancePromises.push(program.provider.send(tx))
-    await sleep(requestDelay)
+    withdrawAdvanceTxs.push({ tx: tx, signers: [] })
   }
-  await Promise.all(withdrawAdvancePromises)
+
+  async function signSendAndConfirmWithdrawSubset (
+    withdrawAdvanceTxsSubset: withdrawAdvanceTxType[]
+  ) {
+    // Adapted from anchor.program.provider.sendAll.
+    const blockhash = await connection.getRecentBlockhash()
+    const txs = withdrawAdvanceTxsSubset.map((r) => {
+      const tx = r.tx
+      let signers = r.signers
+      if (signers === undefined) {
+        signers = []
+      }
+      tx.feePayer = provider.wallet.publicKey
+      tx.recentBlockhash = blockhash.blockhash
+      signers
+        .filter((s): s is web3.Signer => s !== undefined)
+        .forEach((kp) => {
+          tx.partialSign(kp)
+        })
+      return tx
+    })
+
+    const signedTxs = await program.provider.wallet.signAllTransactions(txs)
+
+    const withdrawAdvanceTxSignatures = await Promise.all(signedTxs.map(async tx => {
+      const rawTx = tx.serialize()
+      return await program.provider.connection.sendRawTransaction(
+        rawTx,
+        { skipPreflight: true, maxRetries: 16 }
+      )
+    }))
+
+    const confirmations = await Promise.all(withdrawAdvanceTxSignatures.map(async (txSignature, i) => {
+      let isConfirmed = false
+      let isTimeout = false;
+      (async () => {
+        while (!isConfirmed && !isTimeout) {
+          const rawTx = signedTxs[i].serialize()
+          await program.provider.connection.sendRawTransaction(
+            rawTx,
+            { skipPreflight: true, maxRetries: 16 }
+          )
+          await sleep(300)
+        }
+      })()
+      try {
+        await connection.confirmTransaction(txSignature, 'confirmed')
+      } catch (err) {
+        isTimeout = true
+        return false
+      }
+      isConfirmed = true
+      return true
+    }))
+    const failedWithdrawAdvanceTxsSubset = withdrawAdvanceTxsSubset.filter(
+      (tx, i) => !confirmations[i]
+    )
+    console.log('confirmations:', confirmations)
+    if (failedWithdrawAdvanceTxsSubset.length > 0) {
+      await signSendAndConfirmWithdrawSubset(failedWithdrawAdvanceTxsSubset)
+    }
+  }
+
+  await signSendAndConfirmWithdrawSubset(withdrawAdvanceTxs)
 }
 
 export async function withdrawFinalize (withdrawState, proof) {

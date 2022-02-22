@@ -76,7 +76,7 @@ app.post('/relay', async (req: express.Request, res: express.Response): Promise<
     withdrawState: withdrawState.publicKey.toString()
   })
   try {
-    await allWithdrawAdvance(withdrawState, args.requestDelay!)
+    await allWithdrawAdvance(withdrawState)
     await withdrawFinalize(withdrawState, proof)
   } catch (err) {
     console.warn(err)
