@@ -3,6 +3,7 @@ WORKDIR /usr/src/app
 
 # Copy files and install node modules.
 COPY package*.json ./
+RUN npm install -g npm
 RUN npm install
 COPY ./ ./
 
@@ -10,6 +11,5 @@ COPY ./ ./
 ENV ANCHOR_WALLET=./wallet.json
 
 EXPOSE 2008
-ENTRYPOINT [ "npx" ]
-CMD [ "ts-node", "relay.ts", "--fee", "50000000", "--network", "devnet", "--address", "9S8aH8LXtDbPGS5z9dnJWSmwAAjx1AFpQsjBhi8eidnc" ]
+ENTRYPOINT [ "npx", "ts-node", "relay.ts" ]
 

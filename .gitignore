@@ -7,3 +7,6 @@
 # Solana wallet.
 wallet.json
 
+# RPC info.
+rpc.toml
+

@@ -1,7 +1,9 @@
 import express from 'express'
 import { parse } from 'ts-command-line-args'
+import { Wallet } from '@project-serum/anchor'
 
 import {
+  setAnchorProvider,
   withdrawInit,
   allWithdrawAdvance,
   withdrawFinalize
@@ -10,37 +12,35 @@ import {
 const app = express()
 
 // Parse CLI args.
-type Network = 'devnet' | 'testnet' | 'mainnet'
+type Network = 'devnet' | 'mainnet'
 interface RelayerArguments {
-  fee: number
-  address: string
   network: Network
+  fee: number
   port?: number
-  requestDelay?: number
+  txRepeatDelay?: number
 }
 function parseNetwork (value?: string): Network {
-  if (value !== 'devnet' && value !== 'testnet' && value !== 'mainnet') {
+  if (value !== 'devnet' && value !== 'mainnet') {
     throw new Error(`Invalid network: ${value}`)
   }
   return value as Network
 }
 export const args = parse<RelayerArguments>({
-  fee: Number,
-  address: String,
   network: parseNetwork,
+  fee: Number,
   port: { type: Number, optional: true },
-  requestDelay: { type: Number, optional: true }
+  txRepeatDelay: { type: Number, optional: true }
 })
 
 // Set the default args.
 if (!args.port) {
   args.port = 2008
 }
-if (!args.requestDelay) {
-  args.requestDelay = 100
+if (!args.txRepeatDelay) {
+  args.txRepeatDelay = 1000
 }
-
 console.log('args:', args)
+setAnchorProvider(args.network)
 
 app.use(express.json())
 app.use(function (req, res, next) {
@@ -50,9 +50,14 @@ app.use(function (req, res, next) {
 })
 
 // Set up routes.
+app.get('/ping', (req: express.Request, res: express.Response): void => {
+  res.send({ ok: true })
+})
+
+const walletAddress = Wallet.local().payer.publicKey.toString()
 app.get('/feeAndAddress', (req: express.Request, res: express.Response): void => {
   console.log('GET /feeAndAddress')
-  res.send({ fee: args.fee, address: args.address })
+  res.send({ fee: args.fee, address: walletAddress })
 })
 
 app.post('/relay', async (req: express.Request, res: express.Response): Promise<void> => {
@@ -76,7 +81,7 @@ app.post('/relay', async (req: express.Request, res: express.Response): Promise<
     withdrawState: withdrawState.publicKey.toString()
   })
   try {
-    await allWithdrawAdvance(withdrawState)
+    await allWithdrawAdvance(withdrawState, args.txRepeatDelay!)
     await withdrawFinalize(withdrawState, proof)
   } catch (err) {
     console.warn(err)

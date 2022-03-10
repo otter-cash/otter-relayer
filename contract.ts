@@ -7,47 +7,55 @@ import {
   Wallet
 } from '@project-serum/anchor'
 import { bigInt } from 'snarkjs'
+import { parse as tomlParse } from 'toml'
+import { readFileSync } from 'fs'
 
 import idl from './otter_cash_idl.json'
+
+const rpc = tomlParse(readFileSync('./rpc.toml', 'utf8'))
+if (rpc.devnet.startsWith('http') || rpc.mainnet.startsWith('http')) {
+  throw new Error('RPC URL strings must not contain protocol prefixes.')
+}
+console.log('Using RPC config:', { devnet: rpc.devnet, mainet: rpc.mainnet })
 
 const OTTER_PROGRAM_ID = new web3.PublicKey(
   'otterXYtgZ5DRUGX6JGtcZPg3GoWxEqcLrb9MjeCv3X'
 )
+let program: Program
 
-const NETWORK = 'mainnet'
-let NETWORK_URL: string
-if (NETWORK === 'mainnet') {
-  NETWORK_URL = 'https://white-quiet-glitter.solana-mainnet.quiknode.pro/50b29c4983093afa3a2f453fcc775557a4a7e692/'
-} else if (NETWORK === 'devnet') {
-  NETWORK_URL = 'https://nameless-icy-violet.solana-devnet.quiknode.pro/90ccb55668a25df17eaa22f5eda5897657dbc72e/'
-} else {
-  throw new Error('Unreachable.')
+export function setAnchorProvider (network: 'devnet' | 'mainnet') {
+  let networkUrl: string
+  if (network === 'devnet') {
+    networkUrl = 'https://' + rpc.devnet
+  } else if (network === 'mainnet') {
+    networkUrl = 'https://' + rpc.mainnet
+  } else {
+    throw new Error('Unreachable.')
+  }
+  const connection = new web3.Connection(
+    networkUrl,
+    {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 40000,
+      disableRetryOnRateLimit: false
+    }
+  )
+  const provider = new Provider(
+    connection,
+    Wallet.local(),
+    {
+      commitment: 'confirmed',
+      preflightCommitment: 'confirmed',
+      maxRetries: 16
+    }
+  )
+  setProvider(provider)
+  // @ts-ignore
+  program = new Program(idl, OTTER_PROGRAM_ID)
 }
 
-const connection = new web3.Connection(
-  NETWORK_URL,
-  {
-    commitment: 'confirmed',
-    confirmTransactionInitialTimeout: 40000,
-    disableRetryOnRateLimit: false
-  }
-)
-const provider = new Provider(
-  connection,
-  Wallet.local(),
-  {
-    commitment: 'confirmed',
-    preflightCommitment: 'confirmed',
-    maxRetries: 16
-  }
-)
-setProvider(provider)
-// @ts-ignore
-const program = new Program(idl, OTTER_PROGRAM_ID)
-
 const ROUNDS_PER_IX_VKX = 1
-// const IXS_PER_TX_WITHDRAW = 73
-const IXS_PER_TX_WITHDRAW = 30
+const IXS_PER_TX_WITHDRAW = 58
 const NUM_ADVANCES_WITHDRAW = 6 * (Math.ceil(256 / ROUNDS_PER_IX_VKX) + 1) + 4 * (11 + 65 * 11 + 25 + 256 * 5 + 9 + 256 * 5 + 2 + 256 * 5 + 34)
 
 const sleep = ms => new Promise((resolve, reject) => setTimeout(resolve, ms))
@@ -111,7 +119,7 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   return withdrawState
 }
 
-export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
+export async function allWithdrawAdvance (withdrawState: web3.Keypair, txRepeatDelay: number) {
   const withdrawAdvanceIxs: web3.TransactionInstruction[] = []
   for (let i = 0; i < NUM_ADVANCES_WITHDRAW; i++) {
     const ix = program.instruction.withdrawAdvance(
@@ -144,14 +152,14 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     withdrawAdvanceTxsSubset: withdrawAdvanceTxType[]
   ) {
     // Adapted from anchor.program.provider.sendAll.
-    const blockhash = await connection.getRecentBlockhash()
+    const blockhash = await program.provider.connection.getRecentBlockhash()
     const txs = withdrawAdvanceTxsSubset.map((r) => {
       const tx = r.tx
       let signers = r.signers
       if (signers === undefined) {
         signers = []
       }
-      tx.feePayer = provider.wallet.publicKey
+      tx.feePayer = program.provider.wallet.publicKey
       tx.recentBlockhash = blockhash.blockhash
       signers
         .filter((s): s is web3.Signer => s !== undefined)
@@ -181,11 +189,11 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
             rawTx,
             { skipPreflight: true, maxRetries: 16 }
           )
-          await sleep(300)
+          await sleep(txRepeatDelay)
         }
       })()
       try {
-        await connection.confirmTransaction(txSignature, 'confirmed')
+        await program.provider.connection.confirmTransaction(txSignature, 'confirmed')
       } catch (err) {
         isTimeout = true
         return false
