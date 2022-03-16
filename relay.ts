@@ -17,7 +17,6 @@ interface RelayerArguments {
   network: Network
   fee: number
   port?: number
-  txRepeatDelay?: number
 }
 function parseNetwork (value?: string): Network {
   if (value !== 'devnet' && value !== 'mainnet') {
@@ -28,16 +27,12 @@ function parseNetwork (value?: string): Network {
 export const args = parse<RelayerArguments>({
   network: parseNetwork,
   fee: Number,
-  port: { type: Number, optional: true },
-  txRepeatDelay: { type: Number, optional: true }
+  port: { type: Number, optional: true }
 })
 
 // Set the default args.
 if (!args.port) {
   args.port = 2008
-}
-if (!args.txRepeatDelay) {
-  args.txRepeatDelay = 1000
 }
 console.log('args:', args)
 setAnchorProvider(args.network)
@@ -81,7 +76,7 @@ app.post('/relay', async (req: express.Request, res: express.Response): Promise<
     withdrawState: withdrawState.publicKey.toString()
   })
   try {
-    await allWithdrawAdvance(withdrawState, args.txRepeatDelay!)
+    await allWithdrawAdvance(withdrawState)
     await withdrawFinalize(withdrawState, proof)
   } catch (err) {
     console.warn(err)

@@ -36,7 +36,7 @@ export function setAnchorProvider (network: 'devnet' | 'mainnet') {
     networkUrl,
     {
       commitment: 'confirmed',
-      confirmTransactionInitialTimeout: 40000,
+      confirmTransactionInitialTimeout: 120000,
       disableRetryOnRateLimit: false
     }
   )
@@ -45,8 +45,7 @@ export function setAnchorProvider (network: 'devnet' | 'mainnet') {
     Wallet.local(),
     {
       commitment: 'confirmed',
-      preflightCommitment: 'confirmed',
-      maxRetries: 16
+      preflightCommitment: 'confirmed'
     }
   )
   setProvider(provider)
@@ -55,8 +54,14 @@ export function setAnchorProvider (network: 'devnet' | 'mainnet') {
 }
 
 const ROUNDS_PER_IX_VKX = 1
-const IXS_PER_TX_WITHDRAW = 58
+const IXS_PER_TX_WITHDRAW = 55
 const NUM_ADVANCES_WITHDRAW = 6 * (Math.ceil(256 / ROUNDS_PER_IX_VKX) + 1) + 4 * (11 + 65 * 11 + 25 + 256 * 5 + 9 + 256 * 5 + 2 + 256 * 5 + 34)
+
+if (NUM_ADVANCES_WITHDRAW % IXS_PER_TX_WITHDRAW === 0) {
+  throw new Error(
+    'NUM_ADVANCES_WITHDRAW should not be a multiple of IXS_PER_TX_WITHDRAW for ix logic to work.'
+  )
+}
 
 const sleep = ms => new Promise((resolve, reject) => setTimeout(resolve, ms))
 
@@ -119,9 +124,12 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   return withdrawState
 }
 
-export async function allWithdrawAdvance (withdrawState: web3.Keypair, txRepeatDelay: number) {
+export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
+  const NUM_COMPLETE_TXS = Math.floor(NUM_ADVANCES_WITHDRAW / IXS_PER_TX_WITHDRAW)
+  const NUM_REMAINDER_IXS = NUM_ADVANCES_WITHDRAW % IXS_PER_TX_WITHDRAW
+
   const withdrawAdvanceIxs: web3.TransactionInstruction[] = []
-  for (let i = 0; i < NUM_ADVANCES_WITHDRAW; i++) {
+  for (let i = 0; i < NUM_COMPLETE_TXS * IXS_PER_TX_WITHDRAW + NUM_REMAINDER_IXS; i++) {
     const ix = program.instruction.withdrawAdvance(
       Math.floor(i / IXS_PER_TX_WITHDRAW),
       {
@@ -138,7 +146,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair, txRepeatD
     signers: any[]
   }
   const withdrawAdvanceTxs: withdrawAdvanceTxType[] = []
-  for (let i = 0; i < Math.ceil(NUM_ADVANCES_WITHDRAW / IXS_PER_TX_WITHDRAW); i++) {
+  for (let i = 0; i < Math.ceil(withdrawAdvanceIxs.length / IXS_PER_TX_WITHDRAW); i++) {
     const tx = new web3.Transaction()
     for (const ix of withdrawAdvanceIxs.slice(
       IXS_PER_TX_WITHDRAW * i, IXS_PER_TX_WITHDRAW * (i + 1)
@@ -148,9 +156,9 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair, txRepeatD
     withdrawAdvanceTxs.push({ tx: tx, signers: [] })
   }
 
-  async function signSendAndConfirmWithdrawSubset (
+  async function signWithdrawSubset (
     withdrawAdvanceTxsSubset: withdrawAdvanceTxType[]
-  ) {
+  ): Promise<web3.Transaction[]> {
     // Adapted from anchor.program.provider.sendAll.
     const blockhash = await program.provider.connection.getRecentBlockhash()
     const txs = withdrawAdvanceTxsSubset.map((r) => {
@@ -168,49 +176,83 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair, txRepeatD
         })
       return tx
     })
+    return await program.provider.wallet.signAllTransactions(txs)
+  }
 
-    const signedTxs = await program.provider.wallet.signAllTransactions(txs)
+  async function getLinearPhase (): Promise<number> {
+    const withdrawStateData: any = await program.account.withdrawState.fetch(withdrawState.publicKey)
+    // linearPhase is between 0 and 20086, inclusive.
+    let linearPhase = 0
+    switch (withdrawStateData.phaseGlobVkxOrPairing) {
+      case 0:
+        linearPhase = 257 * withdrawStateData.phaseVkxIter +
+          withdrawStateData.phaseVkxMulIter
+        break
+      case 1:
+        linearPhase = 257 * 6 +
+          4635 * withdrawStateData.phasePairingIter +
+          withdrawStateData.phasePairingIterStep
+        break
+      case 2:
+        linearPhase = 257 * 6 + 4636 * 4
+        break
+      default:
+        throw new Error('Unreachable.')
+    }
+    return linearPhase
+  }
 
-    const withdrawAdvanceTxSignatures = await Promise.all(signedTxs.map(async tx => {
+  // Send and confirm the final (spare change) transaction.
+  console.log('Sending finalTx')
+  const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
+  const signedFinalTxSignature = await program.provider.connection.sendRawTransaction(
+    signedFinalTx.serialize(),
+    { skipPreflight: true, maxRetries: 1024 }
+  )
+  await program.provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
+  console.log('Confirmed finalTx')
+
+  // While the linearPhase is not maximum, continue sending newly-signed transactions.
+  let iterNum = 0
+  while (true) {
+    const linearPhase = await getLinearPhase()
+    console.log(`linearPhase = ${linearPhase}`)
+    if (linearPhase === 20086) {
+      return
+    }
+    const fracRemaining = 1 - linearPhase / 20086
+    let numTxsToSend, maxRetries, sleepTime: number
+    if (fracRemaining > 0.2) {
+      numTxsToSend = Math.min(
+        withdrawAdvanceTxs.length - 1,
+        Math.ceil(NUM_COMPLETE_TXS * fracRemaining)
+      )
+      maxRetries = Math.ceil(64 * fracRemaining)
+      sleepTime = 100
+    } else {
+      numTxsToSend = Math.min(
+        withdrawAdvanceTxs.length - 1,
+        Math.ceil(NUM_COMPLETE_TXS * fracRemaining)
+      )
+      maxRetries = 0
+      sleepTime = 250
+    }
+    const signedTxs = await signWithdrawSubset(
+      withdrawAdvanceTxs.slice(0, numTxsToSend)
+    )
+    await Promise.all(signedTxs.map(async tx => {
       const rawTx = tx.serialize()
       return await program.provider.connection.sendRawTransaction(
         rawTx,
-        { skipPreflight: true, maxRetries: 16 }
+        { skipPreflight: true, maxRetries: maxRetries }
       )
     }))
-
-    const confirmations = await Promise.all(withdrawAdvanceTxSignatures.map(async (txSignature, i) => {
-      let isConfirmed = false
-      let isTimeout = false;
-      (async () => {
-        while (!isConfirmed && !isTimeout) {
-          const rawTx = signedTxs[i].serialize()
-          await program.provider.connection.sendRawTransaction(
-            rawTx,
-            { skipPreflight: true, maxRetries: 16 }
-          )
-          await sleep(txRepeatDelay)
-        }
-      })()
-      try {
-        await program.provider.connection.confirmTransaction(txSignature, 'confirmed')
-      } catch (err) {
-        isTimeout = true
-        return false
-      }
-      isConfirmed = true
-      return true
-    }))
-    const failedWithdrawAdvanceTxsSubset = withdrawAdvanceTxsSubset.filter(
-      (tx, i) => !confirmations[i]
-    )
-    console.log('confirmations:', confirmations)
-    if (failedWithdrawAdvanceTxsSubset.length > 0) {
-      await signSendAndConfirmWithdrawSubset(failedWithdrawAdvanceTxsSubset)
+    await sleep(sleepTime)
+    iterNum += 1
+    if (iterNum > 100) {
+      throw new Error('More than 100 iters to advance the withdraw.')
     }
   }
-
-  await signSendAndConfirmWithdrawSubset(withdrawAdvanceTxs)
 }
 
 export async function withdrawFinalize (withdrawState, proof) {
