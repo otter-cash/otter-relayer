@@ -218,6 +218,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     const linearPhase = await getLinearPhase()
     console.log(`linearPhase = ${linearPhase}`)
     if (linearPhase === 20086) {
+      console.log('Reached max linearPhase')
       return
     }
     const fracRemaining = 1 - linearPhase / 20086
@@ -249,13 +250,14 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     }))
     await sleep(sleepTime)
     iterNum += 1
-    if (iterNum > 100) {
-      throw new Error('More than 100 iters to advance the withdraw.')
+    if (iterNum > 500) {
+      throw new Error('More than 500 iters to advance the withdraw.')
     }
   }
 }
 
 export async function withdrawFinalize (withdrawState, proof) {
+  await sleep(5000)
   const [merkleState, merkleStateBump] = await getMerkleState()
   const withdrawStateBeforeFinalize = await program.account.withdrawState.fetch(
     withdrawState.publicKey
