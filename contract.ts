@@ -3,7 +3,7 @@ import {
   setProvider,
   BN,
   Program,
-  Provider,
+  AnchorProvider,
   Wallet
 } from '@project-serum/anchor'
 import { bigInt } from 'snarkjs'
@@ -21,6 +21,7 @@ console.log('Using RPC config:', { devnet: rpc.devnet, mainet: rpc.mainnet })
 const OTTER_PROGRAM_ID = new web3.PublicKey(
   'otterXYtgZ5DRUGX6JGtcZPg3GoWxEqcLrb9MjeCv3X'
 )
+let provider: AnchorProvider
 let program: Program
 
 export function setAnchorProvider (network: 'devnet' | 'mainnet') {
@@ -40,7 +41,7 @@ export function setAnchorProvider (network: 'devnet' | 'mainnet') {
       disableRetryOnRateLimit: false
     }
   )
-  const provider = new Provider(
+  provider = new AnchorProvider(
     connection,
     Wallet.local(),
     {
@@ -115,7 +116,7 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
       accounts: {
         withdrawState: withdrawState.publicKey,
         merkleState: merkleState,
-        user: program.provider.wallet.publicKey,
+        user: provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId
       },
       signers: [withdrawState]
@@ -160,14 +161,14 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     withdrawAdvanceTxsSubset: withdrawAdvanceTxType[]
   ): Promise<web3.Transaction[]> {
     // Adapted from anchor.program.provider.sendAll.
-    const blockhash = await program.provider.connection.getRecentBlockhash()
+    const blockhash = await provider.connection.getRecentBlockhash()
     const txs = withdrawAdvanceTxsSubset.map((r) => {
       const tx = r.tx
       let signers = r.signers
       if (signers === undefined) {
         signers = []
       }
-      tx.feePayer = program.provider.wallet.publicKey
+      tx.feePayer = provider.wallet.publicKey
       tx.recentBlockhash = blockhash.blockhash
       signers
         .filter((s): s is web3.Signer => s !== undefined)
@@ -176,22 +177,37 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
         })
       return tx
     })
-    return await program.provider.wallet.signAllTransactions(txs)
+    return await provider.wallet.signAllTransactions(txs)
   }
 
   async function getLinearPhase (): Promise<number> {
-    const withdrawStateData: any = await program.account.withdrawState.fetch(withdrawState.publicKey)
+    const withdrawStateAccountInfo = await program.account.withdrawState.getAccountInfo(
+      withdrawState.publicKey
+    )
+    if (withdrawStateAccountInfo === null) {
+      return 0
+    }
+
+    const withdrawStateData = withdrawStateAccountInfo.data
+    if (withdrawStateData.length !== 6536) {
+      throw new Error(`Unreachable: WithdrawState data length should be 6536, the Anchor v0.24.2 size. Instead, it was ${withdrawStateData.length}`)
+    }
+
+    // Manually deserialize the phases.
+    const phaseGlobVkxOrPairing = withdrawStateData.readUInt8(392 + 64)
+    const phaseVkxIter = withdrawStateData.readUInt8(392 + 65)
+    const phaseVkxMulIter = withdrawStateData.readUInt16LE(392 + 66)
+    const phasePairingIter = withdrawStateData.readUInt8(392 + 68)
+    const phasePairingIterStep = withdrawStateData.readUInt16LE(392 + 70)
+
     // linearPhase is between 0 and 20086, inclusive.
     let linearPhase = 0
-    switch (withdrawStateData.phaseGlobVkxOrPairing) {
+    switch (phaseGlobVkxOrPairing) {
       case 0:
-        linearPhase = 257 * withdrawStateData.phaseVkxIter +
-          withdrawStateData.phaseVkxMulIter
+        linearPhase = 257 * phaseVkxIter + phaseVkxMulIter
         break
       case 1:
-        linearPhase = 257 * 6 +
-          4635 * withdrawStateData.phasePairingIter +
-          withdrawStateData.phasePairingIterStep
+        linearPhase = 257 * 6 + 4635 * phasePairingIter + phasePairingIterStep
         break
       case 2:
         linearPhase = 257 * 6 + 4636 * 4
@@ -205,11 +221,11 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
   // Send and confirm the final (spare change) transaction.
   console.log('Sending finalTx')
   const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
-  const signedFinalTxSignature = await program.provider.connection.sendRawTransaction(
+  const signedFinalTxSignature = await provider.connection.sendRawTransaction(
     signedFinalTx.serialize(),
     { skipPreflight: true, maxRetries: 1024 }
   )
-  await program.provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
+  await provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
   console.log('Confirmed finalTx')
 
   // While the linearPhase is not maximum, continue sending newly-signed transactions.
@@ -243,7 +259,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     )
     await Promise.all(signedTxs.map(async tx => {
       const rawTx = tx.serialize()
-      return await program.provider.connection.sendRawTransaction(
+      return await provider.connection.sendRawTransaction(
         rawTx,
         { skipPreflight: true, maxRetries: maxRetries }
       )
@@ -259,17 +275,19 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
 export async function withdrawFinalize (withdrawState, proof) {
   await sleep(5000)
   const [merkleState, merkleStateBump] = await getMerkleState()
-  const withdrawStateBeforeFinalize = await program.account.withdrawState.fetch(
+
+  const withdrawStateAccountInfo = await program.account.withdrawState.getAccountInfo(
     withdrawState.publicKey
   )
+  if (withdrawStateAccountInfo === null) {
+    throw new Error('withdrawState had no data.')
+  }
+  const withdrawStateData = withdrawStateAccountInfo.data
 
-  const nullifierHashBN = withdrawStateBeforeFinalize.publicSignals[1]
-  const nullifierHashBytes = Buffer.concat([
-    nullifierHashBN[3].toBuffer('be', 8),
-    nullifierHashBN[2].toBuffer('be', 8),
-    nullifierHashBN[1].toBuffer('be', 8),
-    nullifierHashBN[0].toBuffer('be', 8)
-  ])
+  if (withdrawStateData.length !== 6536) {
+    throw new Error(`Unreachable: WithdrawState data length should be 6536, the Anchor v0.24.2 size. Instead, it was ${withdrawStateData.length}`)
+  }
+  const nullifierHashBytes = withdrawStateData.slice(296, 296 + 8 * 4).reverse()
   const [nullifierHashPDA, nullifierHashPDABump] = await web3.PublicKey.findProgramAddress(
     [nullifierHashBytes],
     program.programId
@@ -287,8 +305,8 @@ export async function withdrawFinalize (withdrawState, proof) {
         withdrawState: withdrawState.publicKey,
         nullifierHashPda: nullifierHashPDA,
         recipient: recipient,
-        relayer: program.provider.wallet.publicKey,
-        user: program.provider.wallet.publicKey,
+        relayer: provider.wallet.publicKey,
+        user: provider.wallet.publicKey,
         systemProgram: web3.SystemProgram.programId
       }
     }
