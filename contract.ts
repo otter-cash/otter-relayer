@@ -55,7 +55,7 @@ export function setAnchorProvider (network: 'devnet' | 'mainnet') {
 }
 
 const ROUNDS_PER_IX_VKX = 1
-const IXS_PER_TX_WITHDRAW = 55
+const IXS_PER_TX_WITHDRAW = 7
 const NUM_ADVANCES_WITHDRAW = 6 * (Math.ceil(256 / ROUNDS_PER_IX_VKX) + 1) + 4 * (11 + 65 * 11 + 25 + 256 * 5 + 9 + 256 * 5 + 2 + 256 * 5 + 34)
 
 if (NUM_ADVANCES_WITHDRAW % IXS_PER_TX_WITHDRAW === 0) {
@@ -85,6 +85,33 @@ function u256BuffToLittleEndianBN (buff: Buffer): BN[] {
   ]
 }
 
+interface withdrawTxType {
+  tx: web3.Transaction,
+  signers: any[]
+}
+async function signWithdrawSubset (
+  withdrawTxsSubset: withdrawTxType[]
+): Promise<web3.Transaction[]> {
+  // Adapted from anchor.program.provider.sendAll.
+  const blockhash = await provider.connection.getRecentBlockhash()
+  const txs = withdrawTxsSubset.map((r) => {
+    const tx = r.tx
+    let signers = r.signers
+    if (signers === undefined) {
+      signers = []
+    }
+    tx.feePayer = provider.wallet.publicKey
+    tx.recentBlockhash = blockhash.blockhash
+    signers
+      .filter((s): s is web3.Signer => s !== undefined)
+      .forEach((kp) => {
+        tx.partialSign(kp)
+      })
+    return tx
+  })
+  return await provider.wallet.signAllTransactions(txs)
+}
+
 export async function withdrawInit (proof): Promise<web3.Keypair> {
   const [merkleState, merkleStateBump] = await getMerkleState()
   const proofArray: BN[][] = []
@@ -103,7 +130,7 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   proofArray[5] = tmp2
 
   const withdrawState = web3.Keypair.generate()
-  await program.rpc.withdrawInit(
+  const withdrawInitTx = program.transaction.withdrawInit(
     merkleStateBump,
     proofArray,
     u256BuffToLittleEndianBN(Buffer.from(proof.publicSignals[0].slice(2), 'hex')),
@@ -122,6 +149,16 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
       signers: [withdrawState]
     }
   )
+  const withdrawInitTxSigned = (await signWithdrawSubset([
+    { tx: withdrawInitTx, signers: [withdrawState] }
+  ]))[0]
+  const withdrawInitTxSignature = await provider.connection.sendRawTransaction(
+    withdrawInitTxSigned.serialize(),
+    { skipPreflight: false, maxRetries: 1024 }
+  )
+  console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
+  await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
+  console.log('Confirmed withdrawInit.')
   return withdrawState
 }
 
@@ -142,11 +179,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     withdrawAdvanceIxs.push(ix)
   }
 
-  interface withdrawAdvanceTxType {
-    tx: web3.Transaction,
-    signers: any[]
-  }
-  const withdrawAdvanceTxs: withdrawAdvanceTxType[] = []
+  const withdrawAdvanceTxs: withdrawTxType[] = []
   for (let i = 0; i < Math.ceil(withdrawAdvanceIxs.length / IXS_PER_TX_WITHDRAW); i++) {
     const tx = new web3.Transaction()
     for (const ix of withdrawAdvanceIxs.slice(
@@ -155,29 +188,6 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
       tx.add(ix)
     }
     withdrawAdvanceTxs.push({ tx: tx, signers: [] })
-  }
-
-  async function signWithdrawSubset (
-    withdrawAdvanceTxsSubset: withdrawAdvanceTxType[]
-  ): Promise<web3.Transaction[]> {
-    // Adapted from anchor.program.provider.sendAll.
-    const blockhash = await provider.connection.getRecentBlockhash()
-    const txs = withdrawAdvanceTxsSubset.map((r) => {
-      const tx = r.tx
-      let signers = r.signers
-      if (signers === undefined) {
-        signers = []
-      }
-      tx.feePayer = provider.wallet.publicKey
-      tx.recentBlockhash = blockhash.blockhash
-      signers
-        .filter((s): s is web3.Signer => s !== undefined)
-        .forEach((kp) => {
-          tx.partialSign(kp)
-        })
-      return tx
-    })
-    return await provider.wallet.signAllTransactions(txs)
   }
 
   async function getLinearPhase (): Promise<number> {
@@ -219,14 +229,12 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
   }
 
   // Send and confirm the final (spare change) transaction.
-  console.log('Sending finalTx')
   const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
   const signedFinalTxSignature = await provider.connection.sendRawTransaction(
     signedFinalTx.serialize(),
     { skipPreflight: true, maxRetries: 1024 }
   )
   await provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
-  console.log('Confirmed finalTx')
 
   // While the linearPhase is not maximum, continue sending newly-signed transactions.
   let iterNum = 0
@@ -242,16 +250,18 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     if (fracRemaining > 0.2) {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
-        Math.ceil(NUM_COMPLETE_TXS * fracRemaining)
+        Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
+        300
       )
-      maxRetries = Math.ceil(64 * fracRemaining)
-      sleepTime = 100
+      maxRetries = 1024
+      sleepTime = 750
     } else {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
-        Math.ceil(NUM_COMPLETE_TXS * fracRemaining)
+        Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
+        300
       )
-      maxRetries = 0
+      maxRetries = 4
       sleepTime = 250
     }
     const signedTxs = await signWithdrawSubset(
@@ -295,7 +305,7 @@ export async function withdrawFinalize (withdrawState, proof) {
 
   const recipient = new web3.PublicKey(Buffer.from(proof.publicSignals[2].slice(2), 'hex').reverse())
 
-  await program.rpc.withdrawFinalize(
+  const withdrawFinalizeTx = program.transaction.withdrawFinalize(
     merkleStateBump,
     nullifierHashPDABump,
     nullifierHashBytes,
@@ -311,4 +321,14 @@ export async function withdrawFinalize (withdrawState, proof) {
       }
     }
   )
+  const withdrawFinalizeTxSigned = (await signWithdrawSubset([
+    { tx: withdrawFinalizeTx, signers: [] }
+  ]))[0]
+  const withdrawFinalizeTxSignature = await provider.connection.sendRawTransaction(
+    withdrawFinalizeTxSigned.serialize(),
+    { skipPreflight: false, maxRetries: 1024 }
+  )
+  console.log('Sent withdrawFinalize tx with signature: ' + withdrawFinalizeTxSignature)
+  await provider.connection.confirmTransaction(withdrawFinalizeTxSignature, 'confirmed')
+  console.log('Confirmed withdrawFinalize.')
 }
