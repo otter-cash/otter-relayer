@@ -112,7 +112,7 @@ async function signWithdrawSubset (
   return await provider.wallet.signAllTransactions(txs)
 }
 
-export async function withdrawInit (proof): Promise<web3.Keypair> {
+export async function withdrawInit (withdrawState, proof): Promise<void> {
   const [merkleState, merkleStateBump] = await getMerkleState()
   const proofArray: BN[][] = []
   for (let i = 0; i < 8; i++) {
@@ -129,7 +129,6 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   proofArray[4] = proofArray[5]
   proofArray[5] = tmp2
 
-  const withdrawState = web3.Keypair.generate()
   const withdrawInitTx = program.transaction.withdrawInit(
     merkleStateBump,
     proofArray,
@@ -159,7 +158,6 @@ export async function withdrawInit (proof): Promise<web3.Keypair> {
   console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
   await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
   console.log('Confirmed withdrawInit.')
-  return withdrawState
 }
 
 export async function allWithdrawAdvance (withdrawState: web3.Keypair) {

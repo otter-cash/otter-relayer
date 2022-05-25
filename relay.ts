@@ -1,6 +1,6 @@
 import express from 'express'
 import { parse } from 'ts-command-line-args'
-import { Wallet } from '@project-serum/anchor'
+import { web3, Wallet } from '@project-serum/anchor'
 
 import {
   setAnchorProvider,
@@ -58,24 +58,14 @@ app.get('/feeAndAddress', (req: express.Request, res: express.Response): void =>
 app.post('/relay', async (req: express.Request, res: express.Response): Promise<void> => {
   console.log('POST /relay')
   const proof = req.body
-  let withdrawState
-  try {
-    withdrawState = await withdrawInit(proof)
-  } catch (err) {
-    console.warn(err)
-    res.send({
-      ok: false,
-      err: err.message,
-      withdrawState: null
-    })
-    return
-  }
+  const withdrawState = web3.Keypair.generate()
   res.send({
     ok: true,
     err: null,
     withdrawState: withdrawState.publicKey.toString()
   })
   try {
+    await withdrawInit(withdrawState, proof)
     await allWithdrawAdvance(withdrawState)
     await withdrawFinalize(withdrawState, proof)
   } catch (err) {
