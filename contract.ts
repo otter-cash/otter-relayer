@@ -249,7 +249,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
         Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
-        300
+        100
       )
       maxRetries = 1024
       sleepTime = 750
@@ -257,7 +257,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
         Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
-        300
+        100
       )
       maxRetries = 4
       sleepTime = 250
