@@ -1,6 +1,6 @@
 import express from 'express'
 import { parse } from 'ts-command-line-args'
-import { web3, Wallet } from '@project-serum/anchor'
+import { web3, Wallet } from '@coral-xyz/anchor'
 
 import {
   setAnchorProvider,

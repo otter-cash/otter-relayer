@@ -3,7 +3,7 @@ WORKDIR /usr/src/app
 
 # Copy files and install node modules.
 COPY package*.json ./
-RUN npm install -g npm
+# RUN npm install -g npm
 RUN npm install
 COPY ./ ./
 

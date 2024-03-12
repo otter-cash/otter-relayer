@@ -5,7 +5,7 @@ import {
   Program,
   AnchorProvider,
   Wallet
-} from '@project-serum/anchor'
+} from '@coral-xyz/anchor'
 import { bigInt } from 'snarkjs'
 import { parse as tomlParse } from 'toml'
 import { readFileSync } from 'fs'
@@ -148,16 +148,25 @@ export async function withdrawInit (withdrawState, proof): Promise<void> {
       signers: [withdrawState]
     }
   )
-  const withdrawInitTxSigned = (await signWithdrawSubset([
-    { tx: withdrawInitTx, signers: [withdrawState] }
-  ]))[0]
-  const withdrawInitTxSignature = await provider.connection.sendRawTransaction(
-    withdrawInitTxSigned.serialize(),
-    { skipPreflight: false, maxRetries: 1024 }
-  )
-  console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
-  await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
-  console.log('Confirmed withdrawInit.')
+  for (let i = 0; i < 10; i++) {
+    try {
+      console.log('Trying withdrawInit on index ' + i)
+      const withdrawInitTxSigned = (await signWithdrawSubset([
+        { tx: withdrawInitTx, signers: [withdrawState] }
+      ]))[0]
+      const withdrawInitTxSignature = await provider.connection.sendRawTransaction(
+        withdrawInitTxSigned.serialize(),
+        { skipPreflight: false, maxRetries: 1024 }
+      )
+      console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
+      await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
+      console.log('Confirmed withdrawInit.')
+      return
+    } catch {
+      console.log('Caught withdrawInit error on index ' + i)
+      continue
+    }
+  }
 }
 
 export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
@@ -227,12 +236,24 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
   }
 
   // Send and confirm the final (spare change) transaction.
-  const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
-  const signedFinalTxSignature = await provider.connection.sendRawTransaction(
-    signedFinalTx.serialize(),
-    { skipPreflight: true, maxRetries: 1024 }
-  )
-  await provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
+  for (let i = 0; i < 20; i++) {
+    try {
+      console.log('Trying withdrawAdvance (spare change) on index ' + i)
+      const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
+      const signedFinalTxSignature = await provider.connection.sendRawTransaction(
+        signedFinalTx.serialize(),
+        { skipPreflight: true, maxRetries: 1024 }
+      )
+      console.log('Sent withdrawAdvance (spare change) tx with signature: ' + signedFinalTxSignature)
+      await provider.connection.confirmTransaction(signedFinalTxSignature, 'confirmed')
+      console.log('Confirmed withdrawAdvance (spare change).')
+      break
+    } catch {
+      console.log('Caught withdrawAdvance (spare change) error on index ' + i)
+      continue
+    }
+    throw new Error("Could not confirm spare change txs.")
+  }
 
   // While the linearPhase is not maximum, continue sending newly-signed transactions.
   let iterNum = 0
@@ -319,14 +340,23 @@ export async function withdrawFinalize (withdrawState, proof) {
       }
     }
   )
-  const withdrawFinalizeTxSigned = (await signWithdrawSubset([
-    { tx: withdrawFinalizeTx, signers: [] }
-  ]))[0]
-  const withdrawFinalizeTxSignature = await provider.connection.sendRawTransaction(
-    withdrawFinalizeTxSigned.serialize(),
-    { skipPreflight: false, maxRetries: 1024 }
-  )
-  console.log('Sent withdrawFinalize tx with signature: ' + withdrawFinalizeTxSignature)
-  await provider.connection.confirmTransaction(withdrawFinalizeTxSignature, 'confirmed')
-  console.log('Confirmed withdrawFinalize.')
+  for (let i = 0; i < 10; i++) {
+    try {
+      console.log('Trying withdrawFinalize on index ' + i)
+      const withdrawFinalizeTxSigned = (await signWithdrawSubset([
+        { tx: withdrawFinalizeTx, signers: [] }
+      ]))[0]
+      const withdrawFinalizeTxSignature = await provider.connection.sendRawTransaction(
+        withdrawFinalizeTxSigned.serialize(),
+        { skipPreflight: false, maxRetries: 1024 }
+      )
+      console.log('Sent withdrawFinalize tx with signature: ' + withdrawFinalizeTxSignature)
+      await provider.connection.confirmTransaction(withdrawFinalizeTxSignature, 'confirmed')
+      console.log('Confirmed withdrawFinalize.')
+      return
+    } catch {
+      console.log('Caught withdrawFinalize error on index ' + i)
+      continue
+    }
+  }
 }
