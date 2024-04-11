@@ -295,8 +295,8 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
     }))
     await sleep(sleepTime)
     iterNum += 1
-    if (iterNum > 500) {
-      throw new Error('More than 500 iters to advance the withdraw.')
+    if (iterNum > 1000) {
+      throw new Error('More than 1000 iters to advance the withdraw.')
     }
   }
 }
