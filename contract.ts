@@ -162,11 +162,13 @@ export async function withdrawInit (withdrawState, proof): Promise<void> {
       await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
       console.log('Confirmed withdrawInit.')
       return
-    } catch {
+    } catch (e) {
+      console.log(e)
       console.log('Caught withdrawInit error on index ' + i)
       continue
     }
   }
+  throw Error('Could not withdrawInit')
 }
 
 export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
