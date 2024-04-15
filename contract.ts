@@ -148,27 +148,38 @@ export async function withdrawInit (withdrawState, proof): Promise<void> {
       signers: [withdrawState]
     }
   )
-  for (let i = 0; i < 10; i++) {
-    try {
-      console.log('Trying withdrawInit on index ' + i)
-      const withdrawInitTxSigned = (await signWithdrawSubset([
-        { tx: withdrawInitTx, signers: [withdrawState] }
-      ]))[0]
-      const withdrawInitTxSignature = await provider.connection.sendRawTransaction(
-        withdrawInitTxSigned.serialize(),
-        { skipPreflight: false, maxRetries: 1024 }
-      )
-      console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
-      await provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
-      console.log('Confirmed withdrawInit.')
-      return
-    } catch (e) {
-      console.log(e)
-      console.log('Caught withdrawInit error on index ' + i)
-      continue
-    }
+  // Send a bunch of withdrawInit, and return when one confirms.
+  const withdrawInitPromises: any[] = [];
+  for (let i = 0; i < 3; i++) {
+    const withdrawInitTxSigned = (await signWithdrawSubset([
+      { tx: withdrawInitTx, signers: [withdrawState] }
+    ]))[0]
+    const withdrawInitTxSignature = await provider.connection.sendRawTransaction(
+      withdrawInitTxSigned.serialize(),
+      { skipPreflight: false, maxRetries: 1024 }
+    )
+    console.log('Sent withdrawInit tx with signature: ' + withdrawInitTxSignature)
+    const initPromise = provider.connection.confirmTransaction(withdrawInitTxSignature, 'confirmed')
+    withdrawInitPromises.push(initPromise);
+    await sleep(1000)
   }
-  throw Error('Could not withdrawInit')
+  await Promise.allSettled(withdrawInitPromises)
+    .then((results) => {
+      const errors: any[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          console.log("WithdrawInit confirmed")
+          return; // Return if one succeeds
+        } else {
+          errors.push(result.reason); // Collect errors from rejected promises
+        }
+      }
+      if (errors.length === withdrawInitPromises.length) {
+        // If all promises failed, log the errors and throw an exception
+        errors.forEach(error => console.error('withdrawInit promise failed:', error));
+        throw new Error('All withdrawInit promieses failed');
+      }
+    });
 }
 
 export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
@@ -238,7 +249,7 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
   }
 
   // Send and confirm the final (spare change) transaction.
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 10; i++) {
     try {
       console.log('Trying withdrawAdvance (spare change) on index ' + i)
       const signedFinalTx = (await signWithdrawSubset(withdrawAdvanceTxs.slice(-1)))[0]
@@ -252,9 +263,10 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
       break
     } catch {
       console.log('Caught withdrawAdvance (spare change) error on index ' + i)
-      continue
+      if (i === 9) {
+        throw new Error('All withdrawAdvance (spare change) attempts failed.')
+      }
     }
-    throw new Error("Could not confirm spare change txs.")
   }
 
   // While the linearPhase is not maximum, continue sending newly-signed transactions.
@@ -272,17 +284,17 @@ export async function allWithdrawAdvance (withdrawState: web3.Keypair) {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
         Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
-        100
+        50
       )
       maxRetries = 1024
-      sleepTime = 750
+      sleepTime = 250
     } else {
       numTxsToSend = Math.min(
         withdrawAdvanceTxs.length - 1,
         Math.ceil(NUM_COMPLETE_TXS * fracRemaining),
-        100
+        50
       )
-      maxRetries = 4
+      maxRetries = 1024
       sleepTime = 250
     }
     const signedTxs = await signWithdrawSubset(
@@ -342,23 +354,35 @@ export async function withdrawFinalize (withdrawState, proof) {
       }
     }
   )
-  for (let i = 0; i < 10; i++) {
-    try {
-      console.log('Trying withdrawFinalize on index ' + i)
-      const withdrawFinalizeTxSigned = (await signWithdrawSubset([
-        { tx: withdrawFinalizeTx, signers: [] }
-      ]))[0]
-      const withdrawFinalizeTxSignature = await provider.connection.sendRawTransaction(
-        withdrawFinalizeTxSigned.serialize(),
-        { skipPreflight: false, maxRetries: 1024 }
-      )
-      console.log('Sent withdrawFinalize tx with signature: ' + withdrawFinalizeTxSignature)
-      await provider.connection.confirmTransaction(withdrawFinalizeTxSignature, 'confirmed')
-      console.log('Confirmed withdrawFinalize.')
-      return
-    } catch {
-      console.log('Caught withdrawFinalize error on index ' + i)
-      continue
-    }
+  // Send a bunch of withdrawFinalize, and return when one confirms.
+  const withdrawFinalizePromises: any[] = [];
+  for (let i = 0; i < 25; i++) {
+    const withdrawFinalizeTxSigned = (await signWithdrawSubset([
+      { tx: withdrawFinalizeTx, signers: [] }
+    ]))[0]
+    const withdrawFinalizeTxSignature = await provider.connection.sendRawTransaction(
+      withdrawFinalizeTxSigned.serialize(),
+      { skipPreflight: false, maxRetries: 1024 }
+    )
+    console.log('Sent withdrawFinalize tx with signature: ' + withdrawFinalizeTxSignature)
+    const finalizePromise = provider.connection.confirmTransaction(withdrawFinalizeTxSignature, 'confirmed')
+    withdrawFinalizePromises.push(finalizePromise);
   }
+  await Promise.allSettled(withdrawFinalizePromises)
+    .then((results) => {
+      const errors: any[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          console.log("WithdrawFinalize confirmed")
+          return; // Return if one succeeds
+        } else {
+          errors.push(result.reason); // Collect errors from rejected promises
+        }
+      }
+      if (errors.length === withdrawFinalizePromises.length) {
+        // If all promises failed, log the errors and throw an exception
+        errors.forEach(error => console.error('withdrawFinalize promise failed:', error));
+        throw new Error('All withdrawFinalize promieses failed');
+      }
+    });
 }
